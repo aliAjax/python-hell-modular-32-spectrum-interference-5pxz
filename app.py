@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--db", default=os.path.join(os.path.dirname(__file__), "data.db"))
     parser.add_argument("--port", type=int, default=8332)
     parser.add_argument("--init", action="store_true", help="initialize the database and exit")
+    parser.add_argument("--migrate", action="store_true", help="backfill follow-up sponsors for legacy items and exit")
     args = parser.parse_args()
 
     repo = Repository(args.db)
@@ -21,6 +22,10 @@ def main():
         return
 
     service = Service(repo)
+    if args.migrate:
+        result = service.backfill_follow_up()
+        print("backfilled %d items" % result["count"])
+        return
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     server = ThreadingHTTPServer(("127.0.0.1", args.port), build_handler(service, static_dir))
     server.service = service

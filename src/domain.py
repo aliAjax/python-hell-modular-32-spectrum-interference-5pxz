@@ -2,15 +2,16 @@ from datetime import datetime
 
 
 class DomainError(Exception):
-    def __init__(self, code, message, status=400):
+    def __init__(self, code, message, status=400, details=None):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.details = details
 
 
 class ConflictError(DomainError):
-    def __init__(self, code, message):
-        super().__init__(code, message, 409)
+    def __init__(self, code, message, details=None):
+        super().__init__(code, message, 409, details)
 
 
 class NotFoundError(DomainError):
@@ -89,3 +90,17 @@ def normalize_source(payload):
         "station_id": payload.get("station_id"),
         "frequency_mhz": payload.get("frequency_mhz"),
     }
+
+
+def normalize_sync_sources(payload):
+    measurements = payload.get("measurements")
+    if not isinstance(measurements, list) or not measurements:
+        raise DomainError("invalid_measurements", "measurements 必须是非空列表")
+    normalized = []
+    for index, raw in enumerate(measurements):
+        if not isinstance(raw, dict):
+            raise DomainError("invalid_measurements", "第 %s 条记录必须是对象" % index)
+        item = normalize_source(raw)
+        item["_index"] = index
+        normalized.append(item)
+    return normalized

@@ -55,6 +55,57 @@ class Service:
         )
         return self.get_item(item_id)
 
+    def claim(self, item_id, actor, role, region=None, expected_version=None):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role not in rules.ACTION_ROLES.get("claim", set()):
+            raise DomainError("forbidden", "当前角色不能领取主办", 403)
+        self.repository.get_item(item_id)
+        return self.repository.claim_follow_up(item_id, actor, role, expected_version)
+
+    def sync_sources(self, item_id, payload, actor, role, region=None):
+        """断网补测回网后按来源合并，逐条独立提交，保留已确认部分并重试未完成项。"""
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role not in rules.SOURCE_ROLES:
+            raise DomainError("forbidden", "当前角色不能提交来源记录", 403)
+        self.repository.get_item(item_id)
+        measurements = domain.normalize_sync_sources(payload)
+        confirmed = []
+        pending = []
+        for measurement in measurements:
+            index = measurement.pop("_index")
+            try:
+                source_region = measurement.get("region")
+                if region and rules.ENFORCE_REGION and role != "regulator" and source_region and source_region != region:
+                    raise DomainError("region_mismatch", "来源记录不属于当前管辖区域", 403)
+                result = self.repository.upsert_source(
+                    item_id,
+                    measurement.pop("source_type"),
+                    measurement.pop("external_id"),
+                    measurement,
+                    measurement.pop("observed_at"),
+                    actor,
+                    role,
+                )
+                result["index"] = index
+                confirmed.append(result)
+            except DomainError as exc:
+                pending.append({
+                    "index": index,
+                    "measurement": measurement,
+                    "error": exc.code,
+                    "message": str(exc),
+                })
+        return {"confirmed": confirmed, "pending": pending}
+
+    def backfill_follow_up(self, actor="system", role="coordinator"):
+        if not actor or not role:
+            raise DomainError("identity_required", "需要用户身份和角色", 401)
+        if role != "coordinator":
+            raise DomainError("forbidden", "只有协调员可以执行迁移补录", 403)
+        return self.repository.backfill_follow_up(actor, role)
+
     def get_item(self, item_id):
         item = self.repository.get_item(item_id)
         item["sources"] = self.repository.list_sources(item_id)

@@ -41,7 +41,11 @@ def build_handler(service, static_dir):
         def _error(self, exc):
             status = getattr(exc, "status", 500)
             code = getattr(exc, "code", "internal_error")
-            self._send(status, {"error": code, "message": str(exc)})
+            body = {"error": code, "message": str(exc)}
+            details = getattr(exc, "details", None)
+            if details:
+                body["details"] = details
+            self._send(status, body)
 
         def do_GET(self):
             try:
@@ -80,6 +84,13 @@ def build_handler(service, static_dir):
                     return self._send(201, service.create_item(payload, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "sources":
                     return self._send(201, service.add_source(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 5 and parts[:2] == ["api", "items"] and parts[3] == "sources" and parts[4] == "sync":
+                    return self._send(200, service.sync_sources(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "claim":
+                    expected = payload.pop("expected_version", None)
+                    return self._send(200, service.claim(int(parts[2]), actor, role, region, expected))
+                if parts == ["api", "admin", "migrate"]:
+                    return self._send(200, service.backfill_follow_up(actor, role))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "actions":
                     action = payload.pop("action", "")
                     if not action:

@@ -14,6 +14,7 @@ ACTION_ROLES = {
     "resolve": {"coordinator", "regulator"},
     "correct_measurement": {"analyst", "monitor"},
     "cancel": {"coordinator"},
+    "claim": {"coordinator"},
 }
 ENFORCE_REGION = True
 REGION_SENSITIVE_ACTIONS = {"suspend", "coordinate", "resolve", "cancel"}
@@ -58,7 +59,7 @@ def apply_action(item, action, payload, actor, role):
         return "assessed", current, {"assessment": current["assessment"]}
 
     if action == "correct_measurement":
-        _need_status(item, {"pending", "assessed", "located"})
+        _need_status(item, {"pending", "assessed", "located", "suspended", "coordinating"})
         try:
             strength = float(payload["strength_dbm"])
         except (KeyError, TypeError, ValueError):
@@ -71,8 +72,21 @@ def apply_action(item, action, payload, actor, role):
         }
         current.setdefault("measurement_revisions", []).append(revision)
         current["strength_dbm"] = strength
+        # 测量更新后原评估立即失效并重算
+        previous_assessment = current.get("assessment")
         current["assessment"] = assess(current)
-        return status, current, {"revision": revision}
+        revision["invalidated_assessment"] = previous_assessment
+        # 已批准的停用授权要重新确认：回到 located，清空授权与协调结论
+        reverted = False
+        if status in {"suspended", "coordinating"}:
+            current.pop("suspend_authorization", None)
+            current.pop("coordination_agreement", None)
+            current.pop("coordination_note", None)
+            reverted = True
+            new_status = "located"
+        else:
+            new_status = status
+        return new_status, current, {"revision": revision, "reverted": reverted}
 
     if action == "locate":
         _need_status(item, {"assessed", "located"})
