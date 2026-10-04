@@ -2,20 +2,21 @@ from datetime import datetime
 
 
 class DomainError(Exception):
-    def __init__(self, code, message, status=400):
+    def __init__(self, code, message, status=400, details=None):
         super().__init__(message)
         self.code = code
         self.status = status
+        self.details = details or {}
 
 
 class ConflictError(DomainError):
-    def __init__(self, code, message):
-        super().__init__(code, message, 409)
+    def __init__(self, code, message, details=None):
+        super().__init__(code, message, 409, details)
 
 
 class NotFoundError(DomainError):
-    def __init__(self, code, message):
-        super().__init__(code, message, 404)
+    def __init__(self, code, message, details=None):
+        super().__init__(code, message, 404, details)
 
 
 def require_text(payload, name):
@@ -57,7 +58,8 @@ def normalize_create(payload):
     strength = number(payload, "strength_dbm")
     detected_at = parse_timestamp(payload, "detected_at")
     reporter = require_text(payload, "reporter")
-    stable_key = "%s|%s|%s|%s" % (station_id, region, frequency, detected_at)
+    # 同一台站、频点、时间视为同一物理干扰事件，跨区提交按此键去重
+    stable_key = "%s|%s|%s" % (station_id, frequency, detected_at)
     return {
         "frequency_mhz": frequency,
         "bandwidth_mhz": bandwidth,

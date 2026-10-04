@@ -1,5 +1,7 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>无线电频谱干扰调查</title><body><h1>无线电频谱干扰调查与协调</h1><p>使用 JSON API 创建干扰事件、记录来源、定位和执行处置动作。</p><pre>GET /health
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>无线电频谱干扰调查</title><body><h1>无线电频谱干扰调查与协调</h1><p>使用 JSON API 创建干扰事件、记录来源、定位和执行处置动作。协调员通过 claim 领取主办形成唯一跟进人；测量更正后停用授权需 confirm_suspend 重新确认；断网补测回网后经 sources/batch 按来源合并。</p><pre>GET /health
 GET /api/state
 POST /api/items
 POST /api/items/{id}/sources
-POST /api/items/{id}/actions</pre></body></html>
+POST /api/items/{id}/sources/batch
+POST /api/items/{id}/actions
+GET /api/items/{id}/audit</pre></body></html>

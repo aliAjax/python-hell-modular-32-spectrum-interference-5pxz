@@ -149,6 +149,17 @@ class Repository:
         finally:
             conn.close()
 
+    def find_by_stable_key(self, entity_type, stable_key):
+        conn = self.connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM items WHERE entity_type=? AND stable_key=?",
+                (entity_type, stable_key),
+            ).fetchone()
+            return self._row_to_item(row)
+        finally:
+            conn.close()
+
     def list_items(self, status=None):
         conn = self.connect()
         try:
@@ -194,6 +205,43 @@ class Repository:
         finally:
             conn.close()
 
+    def merge_source(self, item_id, source_type, external_id, payload, observed_at, actor, role):
+        # 断网补测回网后的按来源合并：同一来源只记一次，重复提交返回已有记录
+        conn = self.connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "INSERT INTO sources(item_id,source_type,external_id,payload,observed_at,created_at) VALUES(?,?,?,?,?,?)",
+                    (item_id, source_type, external_id, canonical_json(payload), observed_at, now_iso()),
+                )
+            except sqlite3.IntegrityError:
+                row = conn.execute(
+                    "SELECT id FROM sources WHERE item_id=? AND source_type=? AND external_id=?",
+                    (item_id, source_type, external_id),
+                ).fetchone()
+                conn.execute("COMMIT")
+                return {"id": row["id"], "created": False}
+            source_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            self.append_audit(
+                conn,
+                item_id,
+                "source_recorded",
+                actor,
+                role,
+                {"source_id": source_id, "source_type": source_type, "external_id": external_id},
+            )
+            conn.execute("COMMIT")
+            return {"id": source_id, "created": True}
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        finally:
+            conn.close()
+
     def list_sources(self, item_id):
         conn = self.connect()
         try:
@@ -228,6 +276,52 @@ class Repository:
             self.append_audit(conn, item_id, action, actor, role, event_payload)
             conn.execute("COMMIT")
             return self.get_item(item_id)
+        except Exception:
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        finally:
+            conn.close()
+
+    # 处置类动作，迁移时以最近一次的处置人补出主办归属
+    DISPOSITION_ACTIONS = ("suspend", "coordinate", "resolve", "cancel")
+
+    def migrate_owners(self):
+        conn = self.connect()
+        migrated = []
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute("SELECT * FROM items ORDER BY id").fetchall()
+            for row in rows:
+                payload = json.loads(row["payload"])
+                if payload.get("owner"):
+                    continue
+                action = conn.execute(
+                    "SELECT actor, action FROM actions WHERE item_id=? AND action IN (?,?,?,?) ORDER BY id DESC LIMIT 1",
+                    (row["id"],) + self.DISPOSITION_ACTIONS,
+                ).fetchone()
+                if action is None:
+                    continue
+                payload["owner"] = action["actor"]
+                payload["owner_backfilled"] = True
+                version = int(row["version"]) + 1
+                conn.execute(
+                    "UPDATE items SET payload=?,version=?,updated_at=? WHERE id=?",
+                    (canonical_json(payload), version, now_iso(), row["id"]),
+                )
+                self.append_audit(
+                    conn,
+                    row["id"],
+                    "owner_backfilled",
+                    "system",
+                    "system",
+                    {"owner": action["actor"], "source_action": action["action"]},
+                )
+                migrated.append({"item_id": row["id"], "owner": action["actor"]})
+            conn.execute("COMMIT")
+            return migrated
         except Exception:
             try:
                 conn.execute("ROLLBACK")

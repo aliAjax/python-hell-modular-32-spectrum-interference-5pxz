@@ -41,7 +41,11 @@ def build_handler(service, static_dir):
         def _error(self, exc):
             status = getattr(exc, "status", 500)
             code = getattr(exc, "code", "internal_error")
-            self._send(status, {"error": code, "message": str(exc)})
+            body = {"error": code, "message": str(exc)}
+            details = getattr(exc, "details", None)
+            if details:
+                body["details"] = details
+            self._send(status, body)
 
         def do_GET(self):
             try:
@@ -80,6 +84,11 @@ def build_handler(service, static_dir):
                     return self._send(201, service.create_item(payload, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "sources":
                     return self._send(201, service.add_source(int(parts[2]), payload, actor, role, region))
+                if len(parts) == 5 and parts[:2] == ["api", "items"] and parts[3] == "sources" and parts[4] == "batch":
+                    sources = payload.get("sources") if isinstance(payload, dict) else None
+                    if not isinstance(sources, list):
+                        raise DomainError("field_required", "sources 必须是数组", 400)
+                    return self._send(200, service.add_sources_batch(int(parts[2]), sources, actor, role, region))
                 if len(parts) == 4 and parts[:2] == ["api", "items"] and parts[3] == "actions":
                     action = payload.pop("action", "")
                     if not action:

@@ -12,12 +12,19 @@ def main():
     parser.add_argument("--db", default=os.path.join(os.path.dirname(__file__), "data.db"))
     parser.add_argument("--port", type=int, default=8332)
     parser.add_argument("--init", action="store_true", help="initialize the database and exit")
+    parser.add_argument("--migrate", action="store_true", help="backfill owners for legacy records and exit")
     args = parser.parse_args()
 
     repo = Repository(args.db)
     repo.initialize()
     if args.init:
         print("initialized: %s" % args.db)
+        return
+    if args.migrate:
+        migrated = repo.migrate_owners()
+        for entry in migrated:
+            print("item %s -> owner %s" % (entry["item_id"], entry["owner"]))
+        print("migrated: %d" % len(migrated))
         return
 
     service = Service(repo)
